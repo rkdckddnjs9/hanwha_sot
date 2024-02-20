@@ -1,0 +1,2 @@
+mtt_msgs
+-DCATKIN_DEVEL_PREFIX=/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/devel -DCMAKE_INSTALL_PREFIX=/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/install -G Unix Makefiles

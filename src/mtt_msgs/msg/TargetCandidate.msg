@@ -1,0 +1,16 @@
+std_msgs/Header header
+std_msgs/Int32 id_1
+std_msgs/Int8 class_1
+geometry_msgs/Point position_1
+std_msgs/Int32 id_2
+std_msgs/Int8 class_2
+geometry_msgs/Point position_2
+std_msgs/Int32 id_3
+std_msgs/Int8 class_3
+geometry_msgs/Point position_3
+std_msgs/Int32 id_4
+std_msgs/Int8 class_4
+geometry_msgs/Point position_4
+std_msgs/Int32 id_5
+std_msgs/Int8 class_5
+geometry_msgs/Point position_5

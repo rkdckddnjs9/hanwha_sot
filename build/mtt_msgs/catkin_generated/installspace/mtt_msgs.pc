@@ -1,0 +1,8 @@
+prefix=/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/install
+
+Name: mtt_msgs
+Description: Description of mtt_msgs
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib 
+Requires: 
