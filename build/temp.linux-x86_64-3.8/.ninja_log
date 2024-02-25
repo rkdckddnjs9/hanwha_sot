@@ -1,5 +1,0 @@
-# ninja log v5
-0	1285	1708419690962326175	/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/build/temp.linux-x86_64-3.8/livoxdetection/ops/iou3d_nms/src/iou3d_nms_kernel.o	1a16a8b764f91246
-0	9842	1708419699518432485	/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/build/temp.linux-x86_64-3.8/livoxdetection/ops/iou3d_nms/src/iou3d_cpu.o	b5909eac96c27aa0
-0	9972	1708419699646434079	/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/build/temp.linux-x86_64-3.8/livoxdetection/ops/iou3d_nms/src/iou3d_nms.o	63ddbeb181e98329
-0	14005	1708419703678484313	/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot/build/temp.linux-x86_64-3.8/livoxdetection/ops/iou3d_nms/src/iou3d_nms_api.o	b028e8e2871b91bf

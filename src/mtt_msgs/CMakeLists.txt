@@ -11,7 +11,6 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   message_generation
   std_msgs
-  message_generation
   roscpp
   rospy
 )
@@ -20,6 +19,8 @@ add_message_files(
   FILES
   TargetCandidate.msg
 	FollowTargetInfo.msg
+  DynamicObject.msg
+  DynamicObjectList.msg
 )
 
 generate_messages(

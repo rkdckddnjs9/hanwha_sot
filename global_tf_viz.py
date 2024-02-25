@@ -23,10 +23,11 @@ def target_info_callback(data):
     #     count += 1
     # odom_x.append(data.pose.position.x - init_x)
     # odom_y.append(data.pose.position.y - init_y)
-    
+    # init_x, init_y = 319733.341874, 3985798.20831
     odom_x.append(data.pose.position.x)
     odom_y.append(data.pose.position.y)
-    
+    # odom_x.append(data.pose.position.x - init_x)
+    # odom_y.append(data.pose.position.y - init_y)
     print(odom_x[-1], odom_y[-1])
     
     # plt.cla()  # 현재 축을 지웁니다.
