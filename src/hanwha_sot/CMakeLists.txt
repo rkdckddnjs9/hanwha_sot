@@ -30,6 +30,7 @@ catkin_install_python(PROGRAMS
   scripts/hanwha_refactoring_code_for_0223_w_queue_tf.py
   scripts/hanwha_refactoring_code_base_mot.py
   scripts/queue_tf.py
+  scripts/hanwha_refactoring_code_v2.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
