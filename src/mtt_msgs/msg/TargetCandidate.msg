@@ -1,0 +1,16 @@
+Header header
+int32 id_1
+int8 class_1
+geometry_msgs/Point position_1
+int32 id_2
+int8 class_2
+geometry_msgs/Point position_2
+int32 id_3
+int8 class_3
+geometry_msgs/Point position_3
+int32 id_4
+int8 class_4
+geometry_msgs/Point position_4
+int32 id_5
+int8 class_5
+geometry_msgs/Point position_5
