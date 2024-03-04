@@ -867,16 +867,16 @@ class ros_demo():
                                 bbox_list = bbox_list[(bbox_list[:, 2]>box_z_filter), :]
                                 bbox_list = bbox_list[nms_without_scores(bbox_list, 0.9)[:10]]
                                 
-                                if ocl_count >=0 and ocl_count < 1: #for temporary occlusion
-                                    # import pdb; pdb.set_trace()
-                                    max_l, max_w, max_h = np.max(np.array(sot_list)[:, :, 3]), np.max(np.array(sot_list)[:, :, 4]), np.max(np.array(sot_list)[:, :, 5])
-                                    # cut_range_2 = np.array([prev_x-max_w/2, prev_y-max_l/2, prev_z-max_h/4, prev_x+max_w/2, prev_y+max_l/2, prev_z+max_h/4])
-                                    cut_range_2 = np.array([x-max_w/2, y-max_l/2, z-max_h/4, x+max_w/2, y+max_l/2, z+max_h/4])
-                                    temp_pc_2 = mask_points_out_of_range_2(data_infer['points'][:, 1:4], cut_range_2)
-                                    clusters_2 = cluster_obstacles_2(temp_pc_2, eps=0.3, min_samples=5) 
-                                    bbox_list_2 = calculate_bounding_boxes(clusters_2)
+                                #if ocl_count >=0 and ocl_count < 1: #for temporary occlusion
+                                #    # import pdb; pdb.set_trace()
+                                #    max_l, max_w, max_h = np.max(np.array(sot_list)[:, :, 3]), np.max(np.array(sot_list)[:, :, 4]), np.max(np.array(sot_list)[:, :, 5])
+                                #    # cut_range_2 = np.array([prev_x-max_w/2, prev_y-max_l/2, prev_z-max_h/4, prev_x+max_w/2, prev_y+max_l/2, prev_z+max_h/4])
+                                #    cut_range_2 = np.array([x-max_w/2, y-max_l/2, z-max_h/4, x+max_w/2, y+max_l/2, z+max_h/4])
+                                #    temp_pc_2 = mask_points_out_of_range_2(data_infer['points'][:, 1:4], cut_range_2)
+                                #    clusters_2 = cluster_obstacles_2(temp_pc_2, eps=0.3, min_samples=5) 
+                                #    bbox_list_2 = calculate_bounding_boxes(clusters_2)
                                     
-                                    bbox_list = np.vstack([bbox_list, bbox_list_2])
+                                #    bbox_list = np.vstack([bbox_list, bbox_list_2])
                                 
                                 # bbox_list[:, 2] += var_z
                                 # dist_mask =  get_target_distance(sot_list[-1].copy(), bbox_list)
