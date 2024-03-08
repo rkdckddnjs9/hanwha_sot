@@ -1,0 +1,8 @@
+<launch>
+    <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" />
+    <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" />
+    
+    <node name="sot_node" pkg="hanwha_sot" type="hanwha_refactoring_code_for_0223_w_queue_tf.py" output="screen" >
+        <param name="pt" value="$(find hanwha_sot)/scripts/pt/livox_model_2.pt"/>
+    </node>
+</launch>
