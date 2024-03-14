@@ -6,6 +6,7 @@ import cv2
 import Queue as queue
 import threading
 import numpy as np
+import time
 
 class ImageFlipper:
     def __init__(self):
@@ -48,6 +49,7 @@ class ImageFlipper:
         self.queue.put((msg, topic))  # Store both the message and the topic in the queue
 
 if __name__ == '__main__':
+    # time.sleep(10)
     rospy.init_node('flip_image_node')
     image_flipper = ImageFlipper()
 
@@ -63,5 +65,7 @@ if __name__ == '__main__':
     for input_topic, output_topic in topic_map.items():
         rospy.Subscriber(input_topic, Image, lambda msg, t=input_topic: image_flipper.callback(msg, t))
         image_flipper.publishers[input_topic] = rospy.Publisher(output_topic, Image, queue_size=1)
+        
+    rospy.loginfo("set up image flipper")
 
     rospy.spin()
