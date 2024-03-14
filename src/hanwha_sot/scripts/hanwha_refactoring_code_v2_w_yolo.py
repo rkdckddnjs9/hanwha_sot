@@ -735,6 +735,7 @@ class ros_demo():
                                 temp_[0]['pred_id'] = temp_[0]['pred_id'][slc_idx][np.newaxis, ...]
 
                                 _pred_dicts_ = temp_
+                                ocl_count = 0
                                 
                             except:  
                                 ocl_count += 1
