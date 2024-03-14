@@ -149,4 +149,5 @@ if __name__ == '__main__':
     tf_processor = TFProcessor()
     rospy.Subscriber("/tf", TFMessage, tf_processor.callback)
 
+    rospy.loginfo("set up tf processor")
     rospy.spin()
