@@ -45,5 +45,7 @@ if __name__ == '__main__':
     rospy.Subscriber("/ouster/points", PointCloud2, processor.callback)
 
     pub = rospy.Publisher("/arion/mtt/core/points_flip", PointCloud2, queue_size=1)
+    
+    rospy.loginfo("set up point cloud preprocessor")
 
     rospy.spin()
