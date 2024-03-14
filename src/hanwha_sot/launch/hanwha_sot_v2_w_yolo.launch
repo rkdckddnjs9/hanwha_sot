@@ -1,8 +1,4 @@
 <launch>
-    <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" output="screen" />
-    <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" />
-    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" />
-
     <arg name="max_age" default="50"/>
     <arg name="max_occlusion" default="40"/>
     <arg name="moving_interval" default="5"/>
@@ -23,4 +19,11 @@
         <param name="num_candidate" value="$(arg num_candidate)"/>
 
     </node>
+    
+    <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen" />
+    <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen"  />
+    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen"  />
+    <!-- <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" output="screen" />
+    <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" output="screen"  />
+    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" output="screen"  /> -->
 </launch>
