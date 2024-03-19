@@ -1,0 +1,26 @@
+<launch>
+    <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" output="screen" />
+    <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" />
+    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" />
+
+    <arg name="max_age" default="50"/>
+    <arg name="max_occlusion" default="40"/>
+    <arg name="moving_interval" default="5"/>
+    <arg name="fps_distance" default="6"/>
+    <arg name="max_transfer_dist" default="5"/>
+    <arg name="max_car_transfer_dist" default="20"/>
+    <arg name="num_candidate" default="10"/>
+    
+    <node name="sot_node" pkg="hanwha_sot" type="hanwha_refactoring_code_v2_w_yolo_dh.py" output="screen" >
+        <param name="pt" value="$(find hanwha_sot)/scripts/pt/livox_model_2.pt"/>
+        <param name="yolo_pt" value="$(find hanwha_sot)/scripts/pt/yolov5x6.engine"/>
+        <param name="max_age" value="$(arg max_age)"/>
+        <param name="max_occlusion" value="$(arg max_occlusion)"/>
+        <param name="moving_interval" value="$(arg moving_interval)"/>
+        <param name="fps_distance" value="$(arg fps_distance)"/>
+        <param name="max_transfer_dist" value="$(arg max_transfer_dist)"/>
+        <param name="max_car_transfer_dist" value="$(arg max_car_transfer_dist)"/>
+        <param name="num_candidate" value="$(arg num_candidate)"/>
+
+    </node>
+</launch>
