@@ -28,13 +28,7 @@ catkin_install_python(PROGRAMS
   scripts/queue_pc.py
   scripts/queue_tf.py
   scripts/queue_img.py
-  scripts/hanwha_refactoring_code_v2.py
-  scripts/hanwha_refactoring_code_v2_w_yolo.py
-  scripts/hanwha_refactoring_code_v2_w_yolo_dh.py
-  scripts/hanwha_refactoring_code_v2_dc_fusion.py
-  scripts/hanwha_refactoring_code_for_0223.py
-  scripts/hanwha_refactoring_code_for_0223_w_queue_tf.py
-  scripts/hanwha_refactoring_code_base_mot.py
+  scripts/hanwha_refactoring_code_v2_w_yolox.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

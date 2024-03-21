@@ -651,7 +651,17 @@ class ros_demo():
                             pred_for_track = transform_pred_car(temp_[0], vx, vy)
                             outputs = self.sot_tracker.step_centertrack(pred_for_track, sot_time_lag)
                             temp_ = transform_track_np(outputs)
+                            
+                            slc_idx = np.where(temp_[0]['pred_id'] == selected_id)[0][0]
+                            slc_label = temp_[0]['pred_labels'][slc_idx]
+                            # print("slc_label : {}".format(slc_label))
+                            temp_[0]['pred_boxes'] = temp_[0]['pred_boxes'][slc_idx][np.newaxis, ...]
+                            temp_[0]['pred_scores'] = temp_[0]['pred_scores'][slc_idx][np.newaxis, ...]
+                            temp_[0]['pred_labels'] = temp_[0]['pred_labels'][slc_idx][np.newaxis, ...]
+                            temp_[0]['pred_id'] = temp_[0]['pred_id'][slc_idx][np.newaxis, ...]
+                            _pred_dicts_ = temp_
                             ocl_count = 0
+                            
                         except:
                             ocl_count += 1
                             temp_ = _pred_dicts_
@@ -660,15 +670,7 @@ class ros_demo():
                             temp_ = transform_track_np(outputs)
                             print("fully occlusion! : {}, {}".format(ocl_count, args.max_occlusion))
                             # import pdb; pdb.set_trace()
-                            
-                        slc_idx = np.where(temp_[0]['pred_id'] == selected_id)[0][0]
-                        slc_label = temp_[0]['pred_labels'][slc_idx]
-                        # print("slc_label : {}".format(slc_label))
-                        temp_[0]['pred_boxes'] = temp_[0]['pred_boxes'][slc_idx][np.newaxis, ...]
-                        temp_[0]['pred_scores'] = temp_[0]['pred_scores'][slc_idx][np.newaxis, ...]
-                        temp_[0]['pred_labels'] = temp_[0]['pred_labels'][slc_idx][np.newaxis, ...]
-                        temp_[0]['pred_id'] = temp_[0]['pred_id'][slc_idx][np.newaxis, ...]
-                        _pred_dicts_ = temp_
+                        
 
                         if len(sot_list) < 10:
                             sot_list.append([_pred_dicts_[0]['pred_boxes'][0][:6]]) #np.array([temp_[0]['pred_boxes'][0][:3]])
@@ -978,11 +980,11 @@ class ros_demo():
 
                 rotated_box[:3] = homogeneous_center[:3]
                 rotated_box[:3] += earth2map[:3, 3] # odom -> earth
-                try:
+                try: 
                     target_msg = pub_target_info(pub_dict, rotated_box)
-                except:
-                    import pdb; pdb.set_trace()
-                target_info_pub.publish(target_msg)
+                    target_info_pub.publish(target_msg)
+                except: #연산도중 selected_id가 바뀔 경우 pss
+                    pass
                 
                 # dynamic_msgs publish
                 dyn_msg = pub_dyn_candidate_info(dyn_obj_dicts[0], dyn_obj_dicts[0]['pred_boxes'])
@@ -1035,16 +1037,17 @@ if __name__ == '__main__':
     # ================ yolox ================================
     exp_file = args.exp_file+"{}.py".format(args.yolox_model)
     trt_file = args.yolox_pt+args.yolox_model+"/model_trt.pth"
-    
-    # yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
-    #                                 device='cpu', exp_file=exp_file, 
-    #                                 experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
-    #                                 path=None, save_result=True, trt=True, tsize=None)
+    # trt_file = args.yolox_pt+args.yolox_model+"/{}.pth".format(args.yolox_model)
     
     yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
-                                    device='gpu', exp_file=exp_file, 
+                                    device='cpu', exp_file=exp_file, 
                                     experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
-                                    path=None, save_result=True, trt=True, tsize=None)
+                                    path=None, save_result=False, trt=True, tsize=None)
+    
+    # yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
+    #                                 device='gpu', exp_file=exp_file, 
+    #                                 experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
+    #                                 path=None, save_result=True, trt=False, tsize=None)
     
     exp = get_exp(yolox_args.exp_file, yolox_args.name)
 
