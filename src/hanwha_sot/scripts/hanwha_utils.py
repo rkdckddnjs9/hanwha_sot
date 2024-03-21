@@ -44,9 +44,9 @@ def heading_to_quaternion(heading_angle):
     half_angle = heading_angle / 2.0
     return (0, 0, math.sin(half_angle), math.cos(half_angle))
 
-def quaternion_to_yaw(quaternion):
-    x, y, z, w = quaternion
-    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+# def quaternion_to_yaw(quaternion):
+#     x, y, z, w = quaternion
+#     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 def quaternion_to_rotation_matrix(quaternion):
     x, y, z, w = quaternion
@@ -117,13 +117,22 @@ def yaw_to_rotation_matrix(yaw):
 def quaternion_to_pitch(quaternion):
     x, y, z, w = quaternion
     
-    # Compute pitch from the quaternion
     t2 = 2.0 * (w * y - z * x)
     t2 = 1.0 if t2 > 1.0 else t2  # Clamp to 1.0 if out of range due to numerical error
     t2 = -1.0 if t2 < -1.0 else t2  # Clamp to -1.0 if out of range due to numerical error
     pitch = np.arcsin(t2)
     
     return pitch
+
+def quaternion_to_roll(quaternion):
+    """
+    Convert a quaternion into roll (rotation around x-axis).
+    """
+    x, y, z, w = quaternion
+    sinr_cosp = 2 * (w * x + y * z)
+    cosr_cosp = 1 - 2 * (x * x + y * y)
+    roll = np.arctan2(sinr_cosp, cosr_cosp)
+    return roll
 
 def pitch_to_rotation_matrix(pitch):
     
@@ -275,6 +284,15 @@ def mask_points_out_of_range_2(pc, pc_range):
     pc = pc[mask]
     return pc
 
+def mask_points_out_of_range_3(pc, pc_range):
+    pc_range = np.array(pc_range.copy())
+    mask_x = (pc[:, 1] > pc_range[0]) & (pc[:, 1] < pc_range[3])
+    mask_y = (pc[:, 2] > pc_range[1]) & (pc[:, 2] < pc_range[4])
+    mask_z = (pc[:, 3] > pc_range[2]) & (pc[:, 3] < pc_range[5])
+    mask = mask_x & mask_y & mask_z
+    pc = pc[mask]
+    return pc
+
 def check_numpy_to_torch(x):
     if isinstance(x, np.ndarray):
         return torch.from_numpy(x).float(), True
@@ -324,6 +342,33 @@ def boxes_to_corners_3d(boxes3d):
     return corners3d.numpy() if is_numpy else corners3d
 
 def transform_pred(pred):
+    # pred.keys() : ['pred_boxes', 'pred_scores', 'pred_labels']
+    # pred_boxes : (37,7), pred_scores : (37,), pred_labels : (37,)
+    sample_token = "iechhs0fjtjw7ttioqi5skr7ipuuekqv"
+    annos = []
+    # import pdb; pdb.set_trace()
+    for i, box in enumerate(pred['pred_boxes']):
+        rot = Rotation.from_euler('xyz', [0,0,box[-1].item()], degrees=True)
+        try:
+            nusc_anno = {
+                'sample_token': sample_token,
+                "translation": box[:3].tolist(),
+                "size": box[3:6].tolist(),
+                "rotation": rot.as_quat().tolist(),
+                #"rotation": box[-1:].tolist(),
+                "velocity": [0, 0],
+                #"velocity": box[6:8].tolist(),
+                # "detection_name": NUSCENES_TRACKING_NAMES[pred['pred_labels'][i]-1],
+                "detection_name": NUSCENES_TRACKING_NAMES[pred['pred_labels'][i]],
+                "detection_score": float(pred['pred_scores'][i]),
+                "attribute_name": 'None',
+            }
+        except:
+            import pdb;pdb.set_trace()
+        annos.append(nusc_anno)
+    return annos
+
+def transform_pred_car(pred, vx, vy):
     # pred.keys() : ['pred_boxes', 'pred_scores', 'pred_labels']
     # pred_boxes : (37,7), pred_scores : (37,), pred_labels : (37,)
     sample_token = "iechhs0fjtjw7ttioqi5skr7ipuuekqv"

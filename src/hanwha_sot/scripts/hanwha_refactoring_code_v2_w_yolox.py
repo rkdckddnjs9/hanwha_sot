@@ -1,13 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Some codes are modified from the OpenPCDet.
-"""
-
 import os
-import glob
-import datetime
 import argparse
 from pathlib import Path
 from collections import defaultdict
@@ -15,76 +9,44 @@ from collections import defaultdict
 import numpy as np #for yolo, pip install numpy==1.23.5
 
 import torch
-import torch.nn as nn
 from livoxdetection.models.ld_base_v1 import LD_base
 import pdb
 import time
-import importlib
-import math
-from pyquaternion import Quaternion
 
 import copy
 import rospy
 import ros_numpy
-import std_msgs.msg
 from geometry_msgs.msg import Point
-import sensor_msgs.point_cloud2 as pcl2
-from sensor_msgs.msg import PointCloud2, PointField, Image
-from std_msgs.msg import String, Int32, Float32, Int8, Float64MultiArray
-from geometry_msgs.msg import PoseStamped, Point
-from tf2_msgs.msg import TFMessage
-from scipy.spatial.transform import Rotation
+from sensor_msgs.msg import PointCloud2, Image
+from std_msgs.msg import Int32, Float64MultiArray
+from geometry_msgs.msg import Point
 import cv2
 from cv_bridge import CvBridge
 
-import sys
-sys.path.insert(0, "/home/changwon/data_2/hanwha_projects/hanwha_sot/hanwha_sot_v3/src/hanwha_sot/scripts/YOLOX/")
-
-# yolo======================
-from yolox.data.data_augment import ValTransform
+#======== YOLO-X model======================
 from yolox.data.datasets import COCO_CLASSES
 from yolox.exp import get_exp
-from yolox.utils import fuse_model, get_model_info, postprocess, vis
 from yolox.tools.demo import *
 from tools.demo import Predictor
-# ==========================
+# ==========================================
 
-
-# custom message
-#from mtt_msgs.msg import FollowTargetInfo, TargetCandidate, DynamicObject, DynamicObjectList
+# =============custom message ==================================
 from mtt_msgs.msg import FollowTargetInfo, TargetCandidate, DynamicObject, DynamicObjectList, TargetCandidateList
+# ==============================================================
 
-#==== for custom utils =====================
-# sys.path.insert(0, "/home/changwon/data_2/hanwha_projects/hanwha_sot/livox_detection/tools/")
-# sys.path.append("/home/changwon/data_2/hanwha_projects/hanwha_sot/livox_detection/tools/")
-# importlib.import_module("/home/changwon/data_2/hanwha_projects/hanwha_sot/livox_detection/tools/")
+#==== for custom utils =========================================
 from pub_tracker import PubTracker, NUSCENES_TRACKING_NAMES, greedy_assignment
 from hanwha_utils import *
-#==========================
-
-def earth2map_callback(data):
-    global earth2map
-    earth2map = np.array(data.data).reshape([data.layout.dim[0].size, data.layout.dim[0].size])
-
-def odom2base_callback(data):
-    global odom2base
-    odom2base = np.array(data.data).reshape([data.layout.dim[0].size, data.layout.dim[0].size])
-
-def map2odom_callback(data):
-    global map2odom
-    map2odom = np.array(data.data).reshape([data.layout.dim[0].size, data.layout.dim[0].size])
-
-def odom_yaw_list_callback(data):
-    global odom_yaw_list
-    odom_yaw_list = data.data 
-
-def odom_pitch_list_callback(data):
-    global odom_pitch_list
-    odom_pitch_list = data.data 
+#===============================================================
+ 
+from vis_ros_hanwha import ROS_MODULE
+ros_vis = ROS_MODULE()
+last_box_num = 0
+last_gtbox_num = 0
 
 def selection_callback(data):
     global selected_id
-    selected_id = int(data.data)  
+    selected_id = int(data.data) 
  
 def pub_target_info(data, global_box):
     custom_msg = FollowTargetInfo()
@@ -104,7 +66,7 @@ def pub_target_info(data, global_box):
     custom_msg.size = Point(box[3], box[4], box[5])
     # custom_msg.velocity = Point(0.0, 0.0, 0.0)
     custom_msg.velocity = Point(data['pred_velocity'][0][0], data['pred_velocity'][0][1], data['pred_velocity'][0][2])
-
+    
     return custom_msg
 
 def pub_candidate_info(data, global_box):
@@ -230,11 +192,29 @@ def range_img_callback(data):
     # uint8_data = bridge.imgmsg_to_cv2(data, "mono8") ############3 민재코드, 불필요
     range_img = ros_numpy.numpify(data)
 
-# from vis_ros import ROS_MODULE
-from vis_ros_hanwha import ROS_MODULE
-ros_vis = ROS_MODULE()
-last_box_num = 0
-last_gtbox_num = 0
+def earth2map_callback(data):
+    global earth2map
+    earth2map = np.array(data.data).reshape([data.layout.dim[0].size, data.layout.dim[0].size])
+
+def odom2base_callback(data):
+    global odom2base
+    odom2base = np.array(data.data).reshape([data.layout.dim[0].size, data.layout.dim[0].size])
+
+def map2odom_callback(data):
+    global map2odom
+    map2odom = np.array(data.data).reshape([data.layout.dim[0].size, data.layout.dim[0].size])
+
+def odom_roll_list_callback(data):
+    global odom_roll_list
+    odom_roll_list = data.data 
+
+def odom_yaw_list_callback(data):
+    global odom_yaw_list
+    odom_yaw_list = data.data 
+
+def odom_pitch_list_callback(data):
+    global odom_pitch_list
+    odom_pitch_list = data.data 
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -319,7 +299,6 @@ class ros_demo():
         
         self.bridge = CvBridge()
         self.iter = 0
-        self.eta = 0
 
     def receive_from_ros(self, msg):
         pc = ros_numpy.numpify(msg)
@@ -384,14 +363,16 @@ class ros_demo():
         return ros_image
 
     def online_inference(self, msg):
-        global selected_id, _pred_dicts_, temp_selected_id, slc_label, sot_list, count, mask_dist, index2label, label2pub, ocl_count, cluster_count
-        global last_box_num, pred_dicts_sot, init_h, temp_, viz_dicts, prev_pred_dicts_mot, zeor_pub_flag
+        global selected_id, _pred_dicts_, slc_label, sot_list, count, index2label, label2pub, ocl_count, cluster_count
+        global last_box_num, pred_dicts_sot, init_h, temp_, viz_dicts, prev_pred_dicts_mot, zeor_pub_flag, horizontal_FOV, vertical_FOV
+
         torch.cuda.synchronize()
         self.starter.record()
         data_dict = self.receive_from_ros(msg)
         # data_dict = self.receive_from_ros_custom(msg)
         data_infer = ros_demo.collate_batch([data_dict])
         ros_demo.load_data_to_gpu(data_infer)
+        temp_infer_dicts = copy.deepcopy(data_infer)
         mot_time_lag = 1
         sot_time_lag = 1
         pc_viz=False
@@ -423,13 +404,20 @@ class ros_demo():
             pred_dicts_mot[0]['pred_velocity'] = np.zeros((pred_dicts_mot[0]['pred_id'].shape[0],3))
         prev_pred_dicts_mot = pred_dicts_mot
                 
-        # ============================== yolo ===========================================
+        # ============================== yolo x ==========================================
         try:
             nearir_img_ = nearir_img.copy()
             nearir_img_ = cv2.applyColorMap(nearir_img_,cv2.COLORMAP_COOL) #for viz
             img_stack = np.vstack([nearir_img[np.newaxis,...],range_img[np.newaxis,...],ref_img[np.newaxis,...]])
             # img_stack = np.vstack([nearir_img[np.newaxis,...],nearir_img[np.newaxis,...],nearir_img[np.newaxis,...]])
             imgees = nearir_img_
+            
+            if nearir_img.shape == (128, 1152):
+                horizontal_FOV=202.5
+                vertical_FOV=45
+            else:
+                horizontal_FOV=180
+                vertical_FOV=45
             
             # import pdb; pdb.set_trace()
             output = predictor.inference_2(img_stack)
@@ -440,27 +428,22 @@ class ros_demo():
         except:
             print("img topic is empty")
             box2d=np.array([])
-                
+        # ===============================================================================      
         
         box3d = viz_dicts[0]['pred_boxes']
         box3d_cls = viz_dicts[0]['pred_labels'].reshape(-1, 1) # (class_id) # yolo_class: 1:ped, 3:car, 6:bus, 8:truck, -> 0, 2, 5, 7
-        # box2d = result_2d_1.pred[0].cpu() # (xmin, ymin, xmax, ymax, score, class_id)
-        # import pdb; pdb.set_trace()
         
         if box2d.shape[0] == 0 and box3d.shape[0] != 0:
-            print("yolo output is empty / centerpoint output is available")
+            # print("yolo output is empty / centerpoint output is available")
             zeor_pub_flag = True
-            # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
             
         elif box2d.shape[0] == 0 and box3d.shape[0] == 0:
-            print("yolo output is empty / centerpoint output is empty")
+            # print("yolo output is empty / centerpoint output is empty")
             zeor_pub_flag = True
-            # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
             
         elif box2d.shape[0] != 0 and box3d.shape[0] == 0:
-            print("yolo output is avalilble / centerpoint output is empty")
+            # print("yolo output is avalilble / centerpoint output is empty")
             zeor_pub_flag = True
-            # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
             
         else:
             # import pdb; pdb.set_trace()
@@ -468,22 +451,9 @@ class ros_demo():
             cls_mask = (box2d_cls == 0.)+(box2d_cls == 2.)+(box2d_cls == 5.)+(box2d_cls == 7.)
             box2d = box2d[cls_mask[:, 0]]
             box2d_cls = box2d_cls[cls_mask[:, 0]]
-            
-            # box3dto2d = transform_3d_to_2d(box3ds=box3d)
-            if nearir_img.shape == (128, 1152):
-                horizontal_FOV=202.5
-                vertical_FOV=45
-            else:
-                horizontal_FOV=180
-                vertical_FOV=45
-            
+                        
             box3dto2d = transform_3d_to_2d_w_hw(box3ds=box3d, H=nearir_img.shape[0] ,W=nearir_img.shape[1], horizontal_FOV=horizontal_FOV, vertical_FOV=vertical_FOV)
-            print(nearir_img.shape)
-            # import pdb; pdb.set_trace()
-            # box3d_corners = boxes_to_corners_3d(box3d)
-            # # import pdb; pdb.set_trace()
-            # box3dto2d = corners_to_rv_pixels(box3d_corners, H=nearir_img.shape[0] ,W=nearir_img.shape[1])
-            
+
             iou_matrix_vectorized = bb_intersection_over_union_vectorized(box2d[:, :4], box3dto2d)
             if iou_matrix_vectorized.shape[0] != 0:
                 # import pdb; pdb.set_trace()
@@ -495,9 +465,7 @@ class ros_demo():
                 best_N_sorted = best_N[sort_idx]
                 best_M_sorted = best_M[sort_idx]
                 best_IoU_sorted = best_IoU[sort_idx]
-                
-                # imgees = nearir_img_
-                
+                                
                 if best_M_sorted.shape[0] != 0:
                     # import pdb; pdb.set_trace()
                     zeor_pub_flag = False
@@ -507,26 +475,20 @@ class ros_demo():
                     green_color = (0,255,0)
                     red_color = (0,0,255)
                     for best_idx in range(len(best_IoU_sorted)):
-                        # best_2d_ = best_2d[best_idx].int()
                         best_2d_ = best_2d[best_idx].astype(np.int32) # for yolox
                         best_3dto2d_ = best_3dto2d[best_idx].astype(int)
                         cv2.rectangle(imgees, tuple(best_2d_[:2].tolist()), tuple(best_2d_[2:].tolist()),red_color)
                         cv2.rectangle(imgees, tuple(best_3dto2d_[:2].tolist()), tuple(best_3dto2d_[2:].tolist()), green_color)
 
-                    # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
-
                 else:
-                    print("No matched object !! ")
+                    # print("No matched object !! ")
                     zeor_pub_flag = True
-                    # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
             else:
-                print("No matched object !! ")
+                # print("No matched object !! ")
                 zeor_pub_flag = True
-                # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
                 
             self.iter += 1
-        
-        # img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
+            
         pub_dicts = [{'pred_boxes':np.zeros((args.num_candidate, 7)),
                     'pred_scores':np.zeros((args.num_candidate,)),
                     'pred_labels':np.ones((args.num_candidate,), dtype=np.int32),
@@ -594,6 +556,7 @@ class ros_demo():
             
             sot_list = []
             cluster_count = 0
+            ocl_count=0
             
         else:
             try:
@@ -631,87 +594,136 @@ class ros_demo():
                         sot_list.pop(0)
                     cluster_count += 1
                 else:
-                    if slc_label != 1:
-                        x,y,z,l,w,h = sot_list[-1][0]
-                    else:
-                        pass
+                    x,y,z,l,w,h = sot_list[-1][0]
+
+                
+                # ================ Vehicle SOT ==========================================
+                if slc_label == 1:     
                     
-                if slc_label == 1:
-                    try:
-                        slc_idx = np.where(pred_dicts_mot[0]['pred_id'] == selected_id)[0][0]
-                        # slc_label = pred_dicts_mot[0]['pred_id'][slc_idx]
-                        pred_dicts[0]['pred_boxes'] = pred_dicts_mot[0]['pred_boxes'][slc_idx][np.newaxis, ...]
-                        pred_dicts[0]['pred_scores'] = pred_dicts_mot[0]['pred_scores'][slc_idx][np.newaxis, ...]
-                        pred_dicts[0]['pred_labels'] = pred_dicts_mot[0]['pred_labels'][slc_idx][np.newaxis, ...]
-                        pred_dicts[0]['pred_id'] = pred_dicts_mot[0]['pred_id'][slc_idx][np.newaxis, ...]
-                        pred_dicts[0]['pred_velocity'] = pred_dicts_mot[0]['pred_velocity'][slc_idx][np.newaxis, ...]
-                        vx, vy, vz = pred_dicts[0]['pred_velocity'][0]
-                        _pred_dicts_ = pred_dicts
+                    prev_roll = odom_roll_list[-2]
+                    cur_roll = odom_roll_list[-1]
+                    var_roll = cur_roll - prev_roll
+                    rot_m = yaw_to_rotation_matrix(var_roll*args.moving_interval)
+                    x, y, z = rot_m @ np.array([x,y,z])
+                                       
+                    prev_yaw = odom_yaw_list[-2]
+                    cur_yaw = odom_yaw_list[-1]
+                    var_yaw = cur_yaw - prev_yaw
+                    rot_m = yaw_to_rotation_matrix(var_yaw*args.moving_interval)
+                    x, y, z = rot_m @ np.array([x,y,z])
+                    
+                    prev_pitch = odom_pitch_list[-2]
+                    cur_pitch = odom_pitch_list[-1]
+                    var_pitch = cur_pitch - prev_pitch
+                    rot_m = pitch_to_rotation_matrix(var_pitch*args.moving_interval)
+                    x, y, z = rot_m @ np.array([x,y,z])
+                    
+                    if len(sot_list) > 1:
+                        prev_x, prev_y, prev_z = sot_list[-2][0][:3]
+                        vx, vy, vz = x - prev_x, y - prev_y, z - prev_z
+                    else:
+                        vx, vy, vz = 0, 0, 0
+                    
+                    if ocl_count < args.max_occlusion:
+                        try:
+                            cut_range = np.array([x-10, y-10, -2, x+10, y+10, 4])
+                            temp_pc = mask_points_out_of_range_3(data_infer['points'], cut_range)
+                            shift_value = temp_pc[:, 3].min()
+                            temp_pc[:, 3] -= shift_value
+                            temp_pc = mask_points_out_of_range_3(temp_pc, self.point_cloud_range)
+
+                            temp_infer_dicts['points'] = torch.tensor(temp_pc).to(device=temp_infer_dicts['points'].device)
+                            with torch.no_grad(): 
+                                temp_pred_dicts = self.model.forward(temp_infer_dicts)
+                            temp_data_infer, temp_pred_dicts = ROS_MODULE.gpu2cpu(temp_infer_dicts, temp_pred_dicts)   
+                            # ros_vis.ros_print_2(-temp_infer_dicts['points'][:, 1:5])
+                            # import pdb; pdb.set_trace()
+                            label_mask = temp_pred_dicts[0]['pred_labels'] == 1
+                            bbox_list = temp_pred_dicts[0]['pred_boxes'][label_mask]
+                            bbox_list[:,2] += shift_value
+                            # print(bbox_list.shape)
+                            dist_mask =  get_target_distance(sot_list[-1].copy(), bbox_list)
+                            temp_ = [{}]
+                            temp_[0]['pred_boxes'] = bbox_list[dist_mask]
+                            temp_[0]['pred_scores'] = np.ones(bbox_list.shape[0])[dist_mask]
+                            temp_[0]['pred_labels'] = np.full(bbox_list.shape[0], slc_label)[dist_mask]
+
+                            pred_for_track = transform_pred_car(temp_[0], vx, vy)
+                            outputs = self.sot_tracker.step_centertrack(pred_for_track, sot_time_lag)
+                            temp_ = transform_track_np(outputs)
+                            ocl_count = 0
+                        except:
+                            ocl_count += 1
+                            temp_ = _pred_dicts_
+                            pred_for_track = transform_pred(temp_[0])
+                            outputs = self.sot_tracker.step_centertrack(pred_for_track, sot_time_lag)
+                            temp_ = transform_track_np(outputs)
+                            print("fully occlusion! : {}, {}".format(ocl_count, args.max_occlusion))
+                            # import pdb; pdb.set_trace()
+                            
+                        slc_idx = np.where(temp_[0]['pred_id'] == selected_id)[0][0]
+                        slc_label = temp_[0]['pred_labels'][slc_idx]
+                        # print("slc_label : {}".format(slc_label))
+                        temp_[0]['pred_boxes'] = temp_[0]['pred_boxes'][slc_idx][np.newaxis, ...]
+                        temp_[0]['pred_scores'] = temp_[0]['pred_scores'][slc_idx][np.newaxis, ...]
+                        temp_[0]['pred_labels'] = temp_[0]['pred_labels'][slc_idx][np.newaxis, ...]
+                        temp_[0]['pred_id'] = temp_[0]['pred_id'][slc_idx][np.newaxis, ...]
+                        _pred_dicts_ = temp_
+
                         if len(sot_list) < 10:
                             sot_list.append([_pred_dicts_[0]['pred_boxes'][0][:6]]) #np.array([temp_[0]['pred_boxes'][0][:3]])
                         else:
                             sot_list.append([_pred_dicts_[0]['pred_boxes'][0][:6]])
                             sot_list.pop(0)
-                        ocl_count = 0
-                        pred_dicts_sot = _pred_dicts_
-                    except:
-                        print("occlusion !!  :  {} / {} ".format(ocl_count, args.max_occlusion))
-                        _pred_dicts_ = _pred_dicts_
-                        ocl_count += 1
-                        vx, vy, vz = _pred_dicts_[0]['pred_velocity'][0]
-                        
-                        if len(sot_list) < 10:
-                            sot_list.append([_pred_dicts_[0]['pred_boxes'][0][:6]])
-                        else:
-                            sot_list.append([_pred_dicts_[0]['pred_boxes'][0][:6]])
-                            sot_list.pop(0)
-                        pred_dicts_sot = _pred_dicts_
                     
-                    # print("ocl_count : {}".format(ocl_count))    
-                    if ocl_count >= args.max_occlusion:
+                    elif ocl_count >= args.max_occlusion:
                         # import pdb; pdb.set_trace()
                         # new object search
                         prev_label = 1 # Car
-                        prev_obj = sot_list[-1].copy()
                         print("max occlusion !!  :  {} / {} ".format(ocl_count, args.max_occlusion))
                         
                         if dyn_obj_dicts[0]['pred_id'][0] != 0: #no zero_pub = searching matched object!
-                        
                             label_mask = (dyn_obj_dicts[0]['pred_labels']==prev_label)
                             if label_mask.sum() != 0 and dyn_obj_dicts[0]['pred_id'][label_mask].sum() != 0: # no same cls obj in current detection result 
                                 label_mask *= (dyn_obj_dicts[0]['pred_scores']>0)
                                 pred_dicts[0]['pred_boxes'] = dyn_obj_dicts[0]['pred_boxes'][label_mask]
                                 pred_dicts[0]['pred_scores'] = dyn_obj_dicts[0]['pred_scores'][label_mask]
                                 pred_dicts[0]['pred_labels'] = dyn_obj_dicts[0]['pred_labels'][label_mask]
-                                pred_dicts[0]['pred_id'] = dyn_obj_dicts[0]['pred_id'][label_mask]
                                 
-                                dist_mask =  get_target_distance_v2(prev_obj, pred_dicts[0]['pred_boxes']) #distance value return
+                                dist_mask =  get_target_distance_v2(sot_list[-1].copy(), pred_dicts[0]['pred_boxes']) #distance value return
                                 min_dist_idx = np.where(dist_mask[0]==dist_mask.min())[0].item()
-
-
-
                                 dist_mask = dist_mask[0] < args.max_car_transfer_dist
 
                                 if dist_mask[min_dist_idx] == True:
-                                    # import pdb; pdb.set_trace()
                                     temp_ = [{}]
                                     temp_[0]['pred_boxes'] = pred_dicts[0]['pred_boxes'][min_dist_idx][np.newaxis, ...]
                                     temp_[0]['pred_scores'] = pred_dicts[0]['pred_scores'][min_dist_idx][np.newaxis, ...]
                                     temp_[0]['pred_labels'] = pred_dicts[0]['pred_labels'][min_dist_idx][np.newaxis, ...]
-                                    temp_[0]['pred_id'] = pred_dicts[0]['pred_id'][min_dist_idx][np.newaxis, ...]
+                                    
+                                    pred_for_track = transform_pred(temp_[0])
+                                    outputs = self.sot_tracker.step_centertrack(pred_for_track, sot_time_lag)
+                                    temp_ = transform_track_np(outputs)
                                     vx, vy, vz = 0, 0, 0
                                     
+                                    slc_idx_ = np.isclose(pred_dicts[0]['pred_boxes'][dist_mask][:,np.newaxis, :], temp_[0]['pred_boxes'], atol=1e-6).all(axis=2)
+                                    slc_idx = np.where(slc_idx_[0]==True)[0][0]
+                                    slc_label = temp_[0]['pred_labels'][slc_idx]
+                                    temp_[0]['pred_boxes'] = temp_[0]['pred_boxes'][slc_idx][np.newaxis, ...]
+                                    temp_[0]['pred_scores'] = temp_[0]['pred_scores'][slc_idx][np.newaxis, ...]
+                                    temp_[0]['pred_labels'] = temp_[0]['pred_labels'][slc_idx][np.newaxis, ...]
+                                    temp_[0]['pred_id'] = temp_[0]['pred_id'][slc_idx][np.newaxis, ...]
+                                    pred_dicts_sot = temp_
+                                    _pred_dicts_ = temp_
+                                        
                                     sot_list = []
                                     if len(sot_list) < 10:
                                         sot_list.append(np.array([temp_[0]['pred_boxes'][0][:6]]))
                                     else:
                                         sot_list.append(np.array([temp_[0]['pred_boxes'][0][:6]]))
                                         sot_list.pop(0)
-                                    # import pdb; pdb.set_trace()
-                                    _pred_dicts_ = temp_
+                                        
                                     selected_id = _pred_dicts_[0]['pred_id'].item()
                                     ocl_count = 0
-                                    pred_dicts_sot = _pred_dicts_
                                 else:
                                     ocl_count += 1
                                     pc_viz=True
@@ -743,12 +755,6 @@ class ros_demo():
                     if len(sot_list) > 1:
                         prev_x, prev_y, prev_z = sot_list[-2][0][:3]
                         vx, vy, vz = x - prev_x, y - prev_y, z - prev_z
-                        if abs(vx) > 0.3 or abs(vy) > 0.3:
-                            x += vx*0.35
-                            y += vy*0.35
-                            # x += vx*0.1
-                            # y += vy*0.1
-
                     else:
                         vx, vy, vz = 0, 0, 0
                     
@@ -756,23 +762,22 @@ class ros_demo():
                     obj_dist = np.sqrt(np.array(x**2+y**2))
                     if obj_dist <3:
                         box_z_filter = -0.3
-                        near_flag = True
                     else:
-                        # box_z_filter = update_dynamic_z_filter_base(sot_list=sot_list, z_variation_threshold=0.1, min_z_filter=0.3)
                         box_z_filter = update_dynamic_z_filter_base(sot_list=sot_list[-5:], z_variation_threshold=0.1, min_z_filter=-0.6) #for pohang
-                        near_flag = False
-                    
+                    # import pdb; pdb.set_trace()
                     if ocl_count < args.max_occlusion:
                         try:
                             # cut_range = np.array([x-0.36, y-0.36, z-0.4, x+0.36, y+0.36, z+0.4])
                             cut_range = np.array([x-0.36, y-0.36, -2, x+0.36, y+0.36, z+0.4])
                             temp_pc = mask_points_out_of_range_2(data_infer['points'][:, 1:4], cut_range)
                             min_z = temp_pc[:, 2].min() 
-                            if min_z > 0.5:
+                            # print('occ min_z: ', min_z)
+                            if min_z > z-0.5:
                                 cut_range = np.array([x-0.36, y-0.36, z-0.4, x+0.36, y+0.36, z+0.4])
                             else:
-                                box_z_filter = temp_pc[:, 2].min() + 0.6
-                                cut_range = np.array([x-0.36, y-0.36, box_z_filter, x+0.36, y+0.36, z+0.4])
+                                min_z = (min_z + 1.8) / 2.
+                                cut_range = np.array([x-0.36, y-0.36, min_z-0.4, x+0.36, y+0.36, z+0.4])
+                            # print('boz_z, z, z+0.4: {} {} {}'.format(box_z_filter, min_z-0.4, z+0.4) )
                             temp_pc = mask_points_out_of_range_2(temp_pc, cut_range)
                             
 
@@ -815,11 +820,15 @@ class ros_demo():
                                 # cut_range = np.array([x-1., y-1., z-0.4, x+1., y+1., z+0.5])
                                 cut_range = np.array([x-1., y-1., -2, x+1., y+1., 4])
                                 temp_pc = mask_points_out_of_range_2(data_infer['points'][:, 1:4], cut_range)
-                                if min_z > 0.5:
+                                # print('fully min_z: ', min_z)
+                                min_z = temp_pc[:, 2].min() 
+                                if min_z > z-0.5:
                                     cut_range = np.array([x-1., y-1., z-0.4, x+1., y+1., z+0.5])
                                 else:
-                                    box_z_filter = temp_pc[:, 2].min() + 0.6
-                                    cut_range = np.array([x-1., y-1., box_z_filter, x+1., y+1., z+0.5])
+                                    min_z = (min_z + 1.8) / 2.
+                                    # print('diff: ', z+0.5-box_z_filter)
+                                    cut_range = np.array([x-1., y-1., min_z-0.4, x+1., y+1., z+0.5])
+                                print('boz_z, z, z+0.4: {} {} {}'.format(box_z_filter, min_z-0.4, z+0.4) )
                                 temp_pc = mask_points_out_of_range_2(temp_pc, cut_range)
                                 
                                 if np.sqrt(np.array(x**2+y**2)) < args.fps_distance:
@@ -876,10 +885,6 @@ class ros_demo():
                         
                         _pred_dicts_ = temp_
                         
-                        if near_flag and ocl_count<=2:
-                            temp_[0]['pred_boxes'][0][2] += 0.1
-                        elif near_flag and ocl_count>2 and ocl_count <= 3:
-                            temp_[0]['pred_boxes'][0][2] -= 0.1
                         if len(sot_list) < 10:
                             sot_list.append(np.array([temp_[0]['pred_boxes'][0][:6]]))
                         else:
@@ -887,8 +892,6 @@ class ros_demo():
                             sot_list.pop(0)
 
                     else: # occlusion!! # for box transfer
-                        # import pdb; pdb.set_trace()
-                        #_pred_dicts_ = _pred_dicts_ # prev
                         print("max count of occlusion !! : {}/{}".format(ocl_count, args.max_occlusion))
 
                         try: # if no object in current frame
@@ -928,10 +931,6 @@ class ros_demo():
                                         temp_[0]['pred_id'] = temp_[0]['pred_id'][slc_idx][np.newaxis, ...]
                                         pred_dicts_sot = temp_
                                         _pred_dicts_ = temp_
-                                        if near_flag and ocl_count<=2 :
-                                            temp_[0]['pred_boxes'][0][2] += 0.1
-                                        elif near_flag and ocl_count>2 and ocl_count <= 3:
-                                            temp_[0]['pred_boxes'][0][2] -= 0.1
                                             
                                         sot_list = []
                                         if len(sot_list) < 10:
@@ -947,12 +946,25 @@ class ros_demo():
                                 else:
                                     ocl_count += 1
                                     pc_viz=True
+                            else:
+                                ocl_count += 1
                         except:
                             pc_viz=True
-
-                # local to global transformation ==================================
-                # pdb.set_trace()
+                            
+                # ==== sot 3d box to 2d projection and viz==============
+                # import pdb; pdb.set_trace()
+                try:
+                    box3dto2d = transform_3d_to_2d_w_hw(box3ds=temp_[0]['pred_boxes'], H=nearir_img.shape[0] ,W=nearir_img.shape[1], horizontal_FOV=horizontal_FOV, vertical_FOV=vertical_FOV)
+                    blue_color = (255,0,0)
+                    for idx in range(len(box3dto2d)):
+                        box_3dto2d_ = box3dto2d[idx].astype(int)
+                        cv2.rectangle(imgees, tuple(box_3dto2d_[:2].tolist()), tuple(box_3dto2d_[2:].tolist()),blue_color)
+                except:
+                    pass
+                # =========================================================
                 
+    
+                # local to global transformation ==================================
                 viz_dicts = _pred_dicts_
                 rotated_box = _pred_dicts_[0]['pred_boxes'][0].copy()
                 pub_dict = _pred_dicts_[0].copy()
@@ -966,16 +978,21 @@ class ros_demo():
 
                 rotated_box[:3] = homogeneous_center[:3]
                 rotated_box[:3] += earth2map[:3, 3] # odom -> earth
-                #rotated_box[2] *= -1
-                target_msg = pub_target_info(pub_dict, rotated_box)
+                try:
+                    target_msg = pub_target_info(pub_dict, rotated_box)
+                except:
+                    import pdb; pdb.set_trace()
                 target_info_pub.publish(target_msg)
                 
                 # dynamic_msgs publish
                 dyn_msg = pub_dyn_candidate_info(dyn_obj_dicts[0], dyn_obj_dicts[0]['pred_boxes'])
                 dyn_candidate_info_pub.publish(dyn_msg)    
-                # import pdb; pdb.set_trace()
-                # pose_pub.publish(transform_pose_stamped(rotated_box))
                 # ================================================================
+        
+        try:
+            img_pub.publish(self.bridge.cv2_to_imgmsg(imgees))  
+        except:
+            pass
         
         self.ender.record()
         torch.cuda.synchronize()
@@ -989,10 +1006,6 @@ class ros_demo():
         #     #     pass
         #     # import pdb; pdb.set_trace()
         
-        
-        #_pred_dicts_[0]['pred_boxes'][:, 1:3] *= -1
-        #print(_pred_dicts_[0]['pred_boxes'][:, 0:3])
-        # global last_box_num
         if pc_viz == False:
             try:
                 # if selected_id != None and selected_id != -1 and slc_label != 1:
@@ -1002,11 +1015,11 @@ class ros_demo():
                 #         viz_dicts[0]['pred_boxes'][0, 5] = 1.0
                 # _pred_dicts_[0]['pred_boxes'][:, 1:3] *= -1
                 # _pred_dicts_[0]['pred_boxes'][:, 2] *= -1
-                # last_box_num, _ = ros_vis.ros_print(data_dict['points_rviz'][:, 0:4], pred_dicts=_pred_dicts_, last_box_num=last_box_num, class_id=_pred_dicts_[0]['pred_id'])
-                last_box_num, _ = ros_vis.ros_print(data_dict['points_rviz'][:, 0:4], pred_dicts=viz_dicts, last_box_num=last_box_num, class_id=viz_dicts[0]['pred_id'])
+                last_box_num, _ = ros_vis.ros_print(data_dict['points_rviz'][:, 0:4], pred_dicts=_pred_dicts_, last_box_num=last_box_num, class_id=_pred_dicts_[0]['pred_id'])
+                # last_box_num, _ = ros_vis.ros_print(data_dict['points_rviz'][:, 0:4], pred_dicts=viz_dicts, last_box_num=last_box_num, class_id=viz_dicts[0]['pred_id'])
             except:
-                # last_box_num, _ = ros_vis.ros_print_wo_id(data_dict['points_rviz'][:, 0:4], pred_dicts=_pred_dicts_, last_box_num=last_box_num,)
-                last_box_num, _ = ros_vis.ros_print_wo_id(data_dict['points_rviz'][:, 0:4], pred_dicts=viz_dicts, last_box_num=last_box_num,)
+                last_box_num, _ = ros_vis.ros_print_wo_id(data_dict['points_rviz'][:, 0:4], pred_dicts=_pred_dicts_, last_box_num=last_box_num,)
+                # last_box_num, _ = ros_vis.ros_print_wo_id(data_dict['points_rviz'][:, 0:4], pred_dicts=viz_dicts, last_box_num=last_box_num,)
         else:
             ros_vis.ros_print_2(data_dict['points_rviz'][:, 0:4])
         
@@ -1020,15 +1033,19 @@ if __name__ == '__main__':
     model.cuda()
     
     # ================ yolox ================================
-    # import pdb; pdb.set_trace()
     exp_file = args.exp_file+"{}.py".format(args.yolox_model)
     trt_file = args.yolox_pt+args.yolox_model+"/model_trt.pth"
     
+    # yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
+    #                                 device='cpu', exp_file=exp_file, 
+    #                                 experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
+    #                                 path=None, save_result=True, trt=True, tsize=None)
+    
     yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
-                                    device='cpu', exp_file=exp_file, 
+                                    device='gpu', exp_file=exp_file, 
                                     experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
                                     path=None, save_result=True, trt=True, tsize=None)
-    # import pdb; pdb.set_trace()
+    
     exp = get_exp(yolox_args.exp_file, yolox_args.name)
 
     if yolox_args.trt:
@@ -1044,8 +1061,6 @@ if __name__ == '__main__':
 
     if yolox_args.device == "gpu":
         model_2d.cuda()
-        # if args.fp16:
-        #     model_2d.half()  # to FP16
     model_2d.eval()
 
     if yolox_args.trt:
@@ -1065,13 +1080,11 @@ if __name__ == '__main__':
         model_2d, exp, COCO_CLASSES, trt_file, decoder,
         yolox_args.device, yolox_args.fp16, yolox_args.legacy,
     )
-    
     #=========================================================
     
     
     
     # =========== for SOT tracking =====================================
-    # global count, sot_list, index2label, label2pub, ocl_count, cluster_count, odom_yaw_list, odom_pitch_list, lidar_z_list, tf_time
     cluster_count=0
     index2label = {1:'Vehicle', 2:'Pedestrian', 3:'Something'}
     label2pub = {'Vehicle':2, 'Pedestrian':1}
@@ -1079,26 +1092,32 @@ if __name__ == '__main__':
     count = 0
     sot_list = []
     selected_id = None
+    odom_roll_list = []
     odom_yaw_list = []
     odom_pitch_list = []
     lidar_z_list = []
 
-    # =================================================================
-    # global earth2map, map2odom, odom2base, imu2os_sensor, init_odom_rt, N_img 
-    
+    # ================== CenterPoint & poinc cloud scriber node =====================================    
     odom_flag = True
     demo_ros = ros_demo(model, args)
     sub = rospy.Subscriber("/arion/mtt/core/points_flip", PointCloud2, queue_size=10, callback=demo_ros.online_inference)
     # sub = rospy.Subscriber("/ouster/points", PointCloud2, queue_size=10, callback=demo_ros.online_inference)
+    # ==============================================================================================
     
+    # =============== mtt selection node =========================================
     slc_track = rospy.Subscriber("/arion/mtt/core/follow_target_id", Int32, selection_callback)
     # tf = rospy.Subscriber("/tf", TFMessage, tf_callback_3)
+    # ============================================================================
     
+    
+    # =============== subscribe tf topic =================================================================
     earth2map_subscriber = rospy.Subscriber("/arion/mtt/core/earth2map", Float64MultiArray, earth2map_callback)
     odom2base_subscriber = rospy.Subscriber("/arion/mtt/core/odom2base", Float64MultiArray, odom2base_callback)
     map2odom_subscriber = rospy.Subscriber("/arion/mtt/core/map2odom", Float64MultiArray, map2odom_callback)
+    odom_roll_list_subscriber = rospy.Subscriber("/arion/mtt/core/odom_roll_list", Float64MultiArray, odom_roll_list_callback)
     odom_yaw_list_subscriber = rospy.Subscriber("/arion/mtt/core/odom_yaw_list", Float64MultiArray, odom_yaw_list_callback)
     odom_pitch_list_subscriber = rospy.Subscriber("/arion/mtt/core/odom_yaw_list", Float64MultiArray, odom_pitch_list_callback)
+    # ====================================================================================================
     
     # ============for target publish =======================================================================
     target_info_pub = rospy.Publisher('/arion/mtt/core/follow_target_info', FollowTargetInfo, queue_size=10)
@@ -1107,13 +1126,8 @@ if __name__ == '__main__':
     # =====================================================================================================
     
     
-    # for yolo node ========================================================
+    # ============for image porcess node ====================================
     bridge = CvBridge()
-    # model_2d_2 = torch.hub.load("ultralytics/yolov5", "yolov5m.pt")
-    # model_2d_2 = torch.hub.load("ultralytics/yolov5", "yolov5m")
-    # model_2d = torch.hub.load("ultralytics/yolov5", "yolov5x6")
-    # model_2d = torch.hub.load("ultralytics/yolov5", "yolov5m6")
-    # model_2d = torch.hub.load("ultralytics/yolov5", "custom", args.yolo_pt, verbose=False)
     # global img_pub, nearir_img, range_img, signal_img, ref_img
     F_img = rospy.Subscriber("/arion/mtt/core/reflec_flipped_img", Image, ref_img_callback)
     R_img = rospy.Subscriber("/arion/mtt/core/range_flipped_img", Image, range_img_callback)

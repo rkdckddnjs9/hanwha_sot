@@ -18,6 +18,7 @@ class TFProcessor:
         self.odom2base = np.eye(4)
         self.sensor2lidar = np.eye(4)
         self.odom_flag = True
+        self.odom_roll_list = []
         self.odom_yaw_list = []
         self.odom_pitch_list = []
         
@@ -25,6 +26,7 @@ class TFProcessor:
         self.map2odom_publisher = rospy.Publisher("/arion/mtt/core/map2odom", Float64MultiArray, queue_size=10)
         self.odom2base_publisher = rospy.Publisher("/arion/mtt/core/odom2base", Float64MultiArray, queue_size=10)
         
+        self.odom_roll_list_publisher = rospy.Publisher("/arion/mtt/core/odom_roll_list", Float64MultiArray, queue_size=10)
         self.odom_yaw_list_publisher = rospy.Publisher("/arion/mtt/core/odom_yaw_list", Float64MultiArray, queue_size=10)
         self.odom_pitch_list_publisher = rospy.Publisher("/arion/mtt/core/odom_pitch_list", Float64MultiArray, queue_size=10)
     
@@ -57,6 +59,16 @@ class TFProcessor:
         map2odom_msg.layout.dim[0].label = "map2odom"
         map2odom_msg.data = self.map2odom.flatten().tolist()
         self.map2odom_publisher.publish(map2odom_msg) 
+        
+    def publish_roll_list(self):
+        # self.odom_roll_list publish
+        odom_roll_list_msg = Float64MultiArray()
+        odom_roll_list_msg.layout.dim.append(MultiArrayDimension())
+        odom_roll_list_msg.layout.dim[0].size = len(self.odom_roll_list)
+        odom_roll_list_msg.layout.dim[0].stride = len(self.odom_roll_list)
+        odom_roll_list_msg.layout.dim[0].label = "odom_roll_list"
+        odom_roll_list_msg.data = self.odom_pitch_list
+        self.odom_roll_list_publisher.publish(odom_roll_list_msg)
          
     def publish_pitch_list(self):
         # self.odom_yaw_list publish
@@ -129,14 +141,18 @@ class TFProcessor:
                 self.odom2base[:3, 3] = odom2base_t    
                 # print("odom2base_t : {}".format(odom2base_t))
                 if len(self.odom_yaw_list) < 6:
+                    self.odom_roll_list.append(quaternion_to_roll(odom2base_quaternion))
                     self.odom_yaw_list.append(quaternion_to_yaw(odom2base_quaternion))
                     self.odom_pitch_list.append(quaternion_to_pitch(odom2base_quaternion))
                 else:
+                    self.odom_roll_list.append(quaternion_to_roll(odom2base_quaternion))
                     self.odom_yaw_list.append(quaternion_to_yaw(odom2base_quaternion))
                     self.odom_pitch_list.append(quaternion_to_pitch(odom2base_quaternion))
+                    self.odom_roll_list.pop(0)
                     self.odom_yaw_list.pop(0)
                     self.odom_pitch_list.pop(0)
                 self.publish_odom2base()
+                self.publish_roll_list()
                 self.publish_yaw_list()
                 self.publish_pitch_list()
                 # tf_pub.publish(TFMessage([transform]))

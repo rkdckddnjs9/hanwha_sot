@@ -30,10 +30,10 @@
 
     </node>
     
-    <!-- <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen" />
+    <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen" />
     <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen"  />
-    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen"  /> -->
-    <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" output="screen" />
+    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" launch-prefix="bash -c 'sleep 10; $0 $@'" output="screen"  />
+    <!-- <node name="flip_pc_node" pkg="hanwha_sot" type="queue_pc.py" output="screen" />
     <node name="queue_tf" pkg="hanwha_sot" type="queue_tf.py" output="screen"  />
-    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" output="screen"  />
+    <node name="flip_image_node" pkg="hanwha_sot" type="queue_img.py" output="screen"  /> -->
 </launch>
