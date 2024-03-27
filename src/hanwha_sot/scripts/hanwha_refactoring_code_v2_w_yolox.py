@@ -363,7 +363,7 @@ class ros_demo():
         return ros_image
 
     def online_inference(self, msg):
-        global selected_id, _pred_dicts_, slc_label, sot_list, count, index2label, label2pub, ocl_count, cluster_count
+        global selected_id, _pred_dicts_, slc_label, sot_list, count, index2label, label2pub, ocl_count, cluster_count, sot_car_flag
         global last_box_num, pred_dicts_sot, init_h, temp_, viz_dicts, prev_pred_dicts_mot, zeor_pub_flag, horizontal_FOV, vertical_FOV
 
         torch.cuda.synchronize()
@@ -372,14 +372,33 @@ class ros_demo():
         # data_dict = self.receive_from_ros_custom(msg)
         data_infer = ros_demo.collate_batch([data_dict])
         ros_demo.load_data_to_gpu(data_infer)
-        temp_infer_dicts = copy.deepcopy(data_infer)
+        # temp_infer_dicts = copy.deepcopy(data_infer)
         mot_time_lag = 1
         sot_time_lag = 1
         pc_viz=False
         
-        self.model.eval()
-        with torch.no_grad(): 
-            pred_dicts = self.model.forward(data_infer)
+        if sot_car_flag: # 차량 선택 이후, 오르막, 내리막등의 환경에서 z축에 대한 보상을 해주기 위함 
+            cut_range = np.array([sot_list[-1][0][0]-10, sot_list[-1][0][1]-10, -2, sot_list[-1][0][0]+10, sot_list[-1][0][1]+10, 4])
+            temp_mask = mask_points_out_of_range_mask_2(data_infer['points'], cut_range)
+            temp_pc = data_infer['points'][temp_mask]
+            try:
+                shift_value = temp_pc[:, 3].min()
+            except:
+                shift_value = 0
+            temp_pc[:, 3] -= shift_value
+            data_infer['points'][temp_mask] = temp_pc
+            data_infer['points'] = mask_points_out_of_range_3(data_infer['points'], self.point_cloud_range) #filtering for FOV
+            self.model.eval()
+            with torch.no_grad(): 
+                pred_dicts = self.model.forward(data_infer)
+            
+            bbox_mask = mask_points_out_of_range_mask(pred_dicts[0]['pred_boxes'][:, :3], cut_range)
+            pred_dicts[0]['pred_boxes'][bbox_mask, 3] += shift_value
+            # import pdb; pdb.set_trace()
+        else:
+            self.model.eval()
+            with torch.no_grad(): 
+                pred_dicts = self.model.forward(data_infer)
 
         pred_dicts[0]['pred_labels'] = torch.where(pred_dicts[0]['pred_labels']==3, 2, pred_dicts[0]['pred_labels']) #cyclist to pedestrian #['bg', 'Vehicle', 'Pedestrian', 'Cyclist'], 
         
@@ -557,6 +576,7 @@ class ros_demo():
             sot_list = []
             cluster_count = 0
             ocl_count=0
+            sot_car_flag = False
             
         else:
             try:
@@ -599,24 +619,7 @@ class ros_demo():
                 
                 # ================ Vehicle SOT ==========================================
                 if slc_label == 1:     
-                    
-                    prev_roll = odom_roll_list[-2]
-                    cur_roll = odom_roll_list[-1]
-                    var_roll = cur_roll - prev_roll
-                    rot_m = yaw_to_rotation_matrix(var_roll*args.moving_interval)
-                    x, y, z = rot_m @ np.array([x,y,z])
-                                       
-                    prev_yaw = odom_yaw_list[-2]
-                    cur_yaw = odom_yaw_list[-1]
-                    var_yaw = cur_yaw - prev_yaw
-                    rot_m = yaw_to_rotation_matrix(var_yaw*args.moving_interval)
-                    x, y, z = rot_m @ np.array([x,y,z])
-                    
-                    prev_pitch = odom_pitch_list[-2]
-                    cur_pitch = odom_pitch_list[-1]
-                    var_pitch = cur_pitch - prev_pitch
-                    rot_m = pitch_to_rotation_matrix(var_pitch*args.moving_interval)
-                    x, y, z = rot_m @ np.array([x,y,z])
+                    sot_car_flag = True
                     
                     if len(sot_list) > 1:
                         prev_x, prev_y, prev_z = sot_list[-2][0][:3]
@@ -626,21 +629,11 @@ class ros_demo():
                     
                     if ocl_count < args.max_occlusion:
                         try:
-                            cut_range = np.array([x-10, y-10, -2, x+10, y+10, 4])
-                            temp_pc = mask_points_out_of_range_3(data_infer['points'], cut_range)
-                            shift_value = temp_pc[:, 3].min()
-                            temp_pc[:, 3] -= shift_value
-                            temp_pc = mask_points_out_of_range_3(temp_pc, self.point_cloud_range)
-
-                            temp_infer_dicts['points'] = torch.tensor(temp_pc).to(device=temp_infer_dicts['points'].device)
-                            with torch.no_grad(): 
-                                temp_pred_dicts = self.model.forward(temp_infer_dicts)
-                            temp_data_infer, temp_pred_dicts = ROS_MODULE.gpu2cpu(temp_infer_dicts, temp_pred_dicts)   
                             # ros_vis.ros_print_2(-temp_infer_dicts['points'][:, 1:5])
                             # import pdb; pdb.set_trace()
-                            label_mask = temp_pred_dicts[0]['pred_labels'] == 1
-                            bbox_list = temp_pred_dicts[0]['pred_boxes'][label_mask]
-                            bbox_list[:,2] += shift_value
+                            label_mask = pred_dicts_mot[0]['pred_labels'] == 1
+                            bbox_list = pred_dicts_mot[0]['pred_boxes'][label_mask]
+                            # bbox_list[:,2] += shift_value
                             # print(bbox_list.shape)
                             dist_mask =  get_target_distance(sot_list[-1].copy(), bbox_list)
                             temp_ = [{}]
@@ -731,12 +724,22 @@ class ros_demo():
                                     pc_viz=True
                             else: # same cls obj in current detection result 
                                 ocl_count += 1
+                                # import pdb; pdb.set_trace()
                         else:
                             ocl_count += 1
+                            # import pdb; pdb.set_trace()
                 else:
+                    sot_car_flag = False
                     # import pdb; pdb.set_trace()
                     # base yaw angle compensation !
                     # odom topic average hz : 50 Hz -> delta theta * args.moving_interval(default = 5)
+                    
+                    prev_roll = odom_roll_list[-2]
+                    cur_roll = odom_roll_list[-1]
+                    var_roll = cur_roll - prev_roll
+                    rot_m = yaw_to_rotation_matrix(-var_roll*args.moving_interval)
+                    x, y, z = rot_m @ np.array([x,y,z])
+                    
                     prev_yaw = odom_yaw_list[-2]
                     cur_yaw = odom_yaw_list[-1]
                     var_yaw = cur_yaw - prev_yaw
@@ -770,15 +773,17 @@ class ros_demo():
                     if ocl_count < args.max_occlusion:
                         try:
                             # cut_range = np.array([x-0.36, y-0.36, z-0.4, x+0.36, y+0.36, z+0.4])
-                            cut_range = np.array([x-0.36, y-0.36, -2, x+0.36, y+0.36, z+0.4])
+                            cut_range = np.array([x-1, y-1, -2, x+1, y+1, z+0.4])
                             temp_pc = mask_points_out_of_range_2(data_infer['points'][:, 1:4], cut_range)
                             min_z = temp_pc[:, 2].min() 
                             # print('occ min_z: ', min_z)
-                            if min_z > z-0.5:
-                                cut_range = np.array([x-0.36, y-0.36, z-0.4, x+0.36, y+0.36, z+0.4])
-                            else:
-                                min_z = (min_z + 1.8) / 2.
-                                cut_range = np.array([x-0.36, y-0.36, min_z-0.4, x+0.36, y+0.36, z+0.4])
+                            # if min_z > z-0.5:
+                            #     cut_range = np.array([x-0.36, y-0.36, z-0.4, x+0.36, y+0.36, z+0.4])
+                            # else:
+                            #     min_z = (min_z + 1.8) / 2.
+                            #     cut_range = np.array([x-0.36, y-0.36, min_z-0.4, x+0.36, y+0.36, z+0.4])
+                            min_z = (min_z + init_h) / 2.
+                            cut_range = np.array([x-0.36, y-0.36, min_z-0.4, x+0.36, y+0.36, min_z+0.4])
                             # print('boz_z, z, z+0.4: {} {} {}'.format(box_z_filter, min_z-0.4, z+0.4) )
                             temp_pc = mask_points_out_of_range_2(temp_pc, cut_range)
                             
@@ -801,7 +806,7 @@ class ros_demo():
                             bbox_list = bbox_list[(bbox_list[:, 3]<1.), :] # l filtering
                             bbox_list = bbox_list[(bbox_list[:, 4]<1.), :] # w filtering
                             bbox_list = bbox_list[(bbox_list[:, 5]>0.1), :] # h filtering
-                            bbox_list = bbox_list[(bbox_list[:, 2]>box_z_filter), :]
+                            # bbox_list = bbox_list[(bbox_list[:, 2]>box_z_filter), :]
                             bbox_list = bbox_list[nms_without_scores(bbox_list, 0.9)[:10]]
                             
                             # # for distance mask
@@ -824,13 +829,17 @@ class ros_demo():
                                 temp_pc = mask_points_out_of_range_2(data_infer['points'][:, 1:4], cut_range)
                                 # print('fully min_z: ', min_z)
                                 min_z = temp_pc[:, 2].min() 
-                                if min_z > z-0.5:
-                                    cut_range = np.array([x-1., y-1., z-0.4, x+1., y+1., z+0.5])
-                                else:
-                                    min_z = (min_z + 1.8) / 2.
-                                    # print('diff: ', z+0.5-box_z_filter)
-                                    cut_range = np.array([x-1., y-1., min_z-0.4, x+1., y+1., z+0.5])
-                                print('boz_z, z, z+0.4: {} {} {}'.format(box_z_filter, min_z-0.4, z+0.4) )
+                                # if min_z > z-0.5:
+                                #     cut_range = np.array([x-1., y-1., z-0.4, x+1., y+1., z+0.5])
+                                # else:
+                                #     min_z = (min_z + 1.8) / 2.
+                                #     # print('diff: ', z+0.5-box_z_filter)
+                                #     cut_range = np.array([x-1., y-1., min_z-0.4, x+1., y+1., z+0.5])
+                                
+                                min_z = (min_z + init_h) / 2.
+                                cut_range = np.array([x-1., y-1., min_z-0.4, x+1., y+1., min_z+0.5])
+                                
+                                # print('boz_z, z, z+0.4: {} {} {}'.format(box_z_filter, min_z-0.4, z+0.4) )
                                 temp_pc = mask_points_out_of_range_2(temp_pc, cut_range)
                                 
                                 if np.sqrt(np.array(x**2+y**2)) < args.fps_distance:
@@ -846,7 +855,7 @@ class ros_demo():
                                 bbox_list = bbox_list[(bbox_list[:, 3]<1.), :] # l filtering
                                 bbox_list = bbox_list[(bbox_list[:, 4]<1.), :] # w filtering
                                 bbox_list = bbox_list[(bbox_list[:, 5]>0.1), :] # h filtering
-                                bbox_list = bbox_list[(bbox_list[:, 2]>box_z_filter), :]
+                                # bbox_list = bbox_list[(bbox_list[:, 2]>box_z_filter), :]
                                 bbox_list = bbox_list[nms_without_scores(bbox_list, 0.9)[:10]]         
 
                                 # bbox_list[:, 2] += var_z
@@ -965,7 +974,7 @@ class ros_demo():
                     pass
                 # =========================================================
                 
-    
+                # print('box_z_filter, min_z, box_z, box_h: {:<.3f} {:<.3f} {:<.3f} {:<.3f}'.format(box_z_filter, min_z, z, sot_list[-1][0][-1]) )
                 # local to global transformation ==================================
                 viz_dicts = _pred_dicts_
                 rotated_box = _pred_dicts_[0]['pred_boxes'][0].copy()
@@ -983,7 +992,7 @@ class ros_demo():
                 try: 
                     target_msg = pub_target_info(pub_dict, rotated_box)
                     target_info_pub.publish(target_msg)
-                except: #연산도중 selected_id가 바뀔 경우 pss
+                except: #연산도중 selected_id가 바뀔 경우 pass
                     pass
                 
                 # dynamic_msgs publish
@@ -1010,13 +1019,6 @@ class ros_demo():
         
         if pc_viz == False:
             try:
-                # if selected_id != None and selected_id != -1 and slc_label != 1:
-                #     if ocl_count ==0:
-                #         # 임시 박스 h 변경 
-                #         # _pred_dicts_[0]['pred_boxes'][0, 5] = 1.0
-                #         viz_dicts[0]['pred_boxes'][0, 5] = 1.0
-                # _pred_dicts_[0]['pred_boxes'][:, 1:3] *= -1
-                # _pred_dicts_[0]['pred_boxes'][:, 2] *= -1
                 last_box_num, _ = ros_vis.ros_print(data_dict['points_rviz'][:, 0:4], pred_dicts=_pred_dicts_, last_box_num=last_box_num, class_id=_pred_dicts_[0]['pred_id'])
                 # last_box_num, _ = ros_vis.ros_print(data_dict['points_rviz'][:, 0:4], pred_dicts=viz_dicts, last_box_num=last_box_num, class_id=viz_dicts[0]['pred_id'])
             except:
@@ -1036,18 +1038,18 @@ if __name__ == '__main__':
     
     # ================ yolox ================================
     exp_file = args.exp_file+"{}.py".format(args.yolox_model)
-    trt_file = args.yolox_pt+args.yolox_model+"/model_trt.pth"
-    # trt_file = args.yolox_pt+args.yolox_model+"/{}.pth".format(args.yolox_model)
-    
-    yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
-                                    device='cpu', exp_file=exp_file, 
-                                    experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
-                                    path=None, save_result=False, trt=True, tsize=None)
+    # trt_file = args.yolox_pt+args.yolox_model+"/model_trt.pth"
+    trt_file = args.yolox_pt+args.yolox_model+"/{}.pth".format(args.yolox_model)
     
     # yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
-    #                                 device='gpu', exp_file=exp_file, 
+    #                                 device='cpu', exp_file=exp_file, 
     #                                 experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
-    #                                 path=None, save_result=True, trt=False, tsize=None)
+    #                                 path=None, save_result=False, trt=True, tsize=None)
+    
+    yolox_args = argparse.Namespace(camid=0, ckpt=None, conf=args.yolox_conf, demo='image',
+                                    device='gpu', exp_file=exp_file, 
+                                    experiment_name=None, fp16=False, fuse=False, legacy=False, name=None, nms=args.yolox_nms, 
+                                    path=None, save_result=True, trt=False, tsize=None)
     
     exp = get_exp(yolox_args.exp_file, yolox_args.name)
 
@@ -1099,6 +1101,7 @@ if __name__ == '__main__':
     odom_yaw_list = []
     odom_pitch_list = []
     lidar_z_list = []
+    sot_car_flag = False
 
     # ================== CenterPoint & poinc cloud scriber node =====================================    
     odom_flag = True
